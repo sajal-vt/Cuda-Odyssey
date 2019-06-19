@@ -8,7 +8,6 @@ void add(int n, float *x, float *y)
   int stride = blockDim.x * gridDim.x;
   for (int i = index; i < n; i += stride)
     y[i] = x[i] + y[i];
-}    y[i] = x[i] + y[i];
 }
 
 int main(void)

@@ -19,53 +19,58 @@ int test_reduce(std::vector<int> &v);
 using namespace std;
 
 
-// Global max reduce example based on CppCon 2016: “Bringing Clang and C++ to GPUs: An Open-Source, CUDA-Compatible GPU C++ Compiler"
-__global__ void d_max_reduce(const int *in, int *out, size_t N) {
-    int sum = 0;
-    size_t start = (threadIdx.x + blockIdx.x * blockDim.x) * 4;
-    for (size_t i = start; i < start + 4 && i < N; i++) {
-        sum = max(__ldg(in + i), sum);
-    }
-
-    for (int i = 16; i; i >>= 1) {
-        sum = max(__shfl_down(sum, i), sum);
-    }
-
-    __shared__ int shared_sum;
-    shared_sum = 0;
-    __syncthreads();
-
-    if (threadIdx.x % 32 == 0) {
-        atomicMax(&shared_sum, sum);
-    }
-
-    __syncthreads();
-
-    if (threadIdx.x == 0) {
-        atomicMax(out, shared_sum);
-    }
+__global__ void reduce0(int *g_idata, int *g_odata) {
+	extern __shared__ int sdata[];
+	// each thread loads one element from global to shared mem
+	unsigned int tid = threadIdx.x;
+	unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+	sdata[tid] = g_idata[i];
+	__syncthreads();
+	
+	// do reduction in shared mem
+	for(unsigned int s = 1; s < blockDim.x; s *= 2) {
+		if (tid % (2 * s) == 0) {
+		sdata[tid] += sdata[tid + s];
+	}
+	__syncthreads();
+	}
+	// write result for this block to global mem
+	if (tid == 0) g_odata[blockIdx.x] = sdata[0];
 }
 
 int test_reduce(std::vector<int> &v) {
     int *in;
-    int *out;
+    
 
-    cudaMalloc(&in, v.size() * sizeof(int));
-    cudaMalloc(&out, sizeof(int));
+	int* d_in;
+	int* d_out;
+    
+    int num_threads = 32;
+	int num_blocks = v.size() / num_threads;
+	int *out = new int[num_blocks];
+	
+	cudaMalloc(&d_in, v.size() * sizeof(int));
+    cudaMalloc(&d_out, num_blocks * sizeof(int));
 
-    cudaMemcpy(in, v.data(), v.size() * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemset(out, 0, sizeof(int));
+    cudaMemcpy(d_in, v.data(), v.size() * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemset(out, 0, num_blocks * sizeof(int));
 
-    int threads = 32;
+    reduce0<<<num_blocks, num_threads>>>(d_in, d_out);
 
-    d_max_reduce<<<1, threads / 4>>>(in, out, v.size());
+    int res = 0;
 
-    int res;
+    cudaMemcpy(out, d_out, sizeof(int), cudaMemcpyDeviceToHost);
 
-    cudaMemcpy(&res, out, sizeof(int), cudaMemcpyDeviceToHost);
-
-    cudaFree(in);
-    cudaFree(out);
+	for(int i = 0; i < num_blocks; i++)
+	{
+		res += out[i];
+	}
+    cudaFree(d_in);
+    cudaFree(d_out);
+	free(in);
+	free(out);
+	
+	
 
     return res;
 }
@@ -73,7 +78,7 @@ int test_reduce(std::vector<int> &v) {
 
 
 int main() {
-    int N = 64;
+    int N = 1024;
     std::vector<int> vec(N);
 
     std::random_device dev;

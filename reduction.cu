@@ -5,16 +5,12 @@
 #include <cuda_runtime_api.h>
 #include <cmath>
 #include <cstdio>
-#include <chrono>
-#include <random>
-#include <utility>
-#include <algorithm>
 #include <iostream>
 
 using namespace std;
-using namespace std::chrono;
+//using namespace std::chrono;
 
-int test_reduce(std::vector<int> &v);
+int test_reduce(int* v);
 
 using namespace std;
 
@@ -38,37 +34,38 @@ __global__ void reduce0(int *g_idata, int *g_odata) {
 	if (tid == 0) g_odata[blockIdx.x] = sdata[0];
 }
 
-int test_reduce(std::vector<int> &v) {
-    int *in;
+int test_reduce(int* in, int N) {
+   
     
 
 	int* d_in;
 	int* d_out;
     
-    int num_threads = 32;
-	int num_blocks = v.size() / num_threads;
+        int num_threads = 32;
+	int num_blocks = N / num_threads;
 	int *out = new int[num_blocks];
 	
-	cudaMalloc(&d_in, v.size() * sizeof(int));
-    cudaMalloc(&d_out, num_blocks * sizeof(int));
+	cudaMalloc(&d_in, N * sizeof(int));
+        cudaMalloc(&d_out, num_blocks * sizeof(int));
 
-    cudaMemcpy(d_in, v.data(), v.size() * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemset(out, 0, num_blocks * sizeof(int));
+        cudaMemcpy(d_in, in, N * sizeof(int), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_out, out, num_blocks * sizeof(int), cudaMemcpyHostToDevice);
 
-    reduce0<<<num_blocks, num_threads>>>(d_in, d_out);
+        reduce0<<<num_blocks, num_threads, num_threads * sizeof(int)>>>(d_in, d_out);
 
-    int res = 0;
+        int res = 0;
 
-    cudaMemcpy(out, d_out, sizeof(int), cudaMemcpyDeviceToHost);
+        cudaMemcpy(out, d_out, sizeof(int) * num_blocks, cudaMemcpyDeviceToHost);
 
 	for(int i = 0; i < num_blocks; i++)
 	{
-		res += out[i];
+            //std::cout << out[i] << std::endl;
+	    res += out[i];
 	}
-    cudaFree(d_in);
-    cudaFree(d_out);
-	free(in);
-	free(out);
+        cudaFree(d_in);
+        cudaFree(d_out);
+        //delete in;
+        delete out;
 	
 	
 
@@ -79,25 +76,20 @@ int test_reduce(std::vector<int> &v) {
 
 int main() {
     int N = 1024;
-    std::vector<int> vec(N);
-
-    std::random_device dev;
-    std::mt19937 mt(dev());
-    std::uniform_int_distribution<> dist(0, N);
-
-    for (size_t i = 0; i < vec.size(); i++) {
-        vec[i] = dist(mt);
+    int* in = new int[N];
+    for (int i = 0; i < N; i++) {
+        in[i] = i + 1;
     }
 
     int maximo = 0;
-    for (size_t i = 0; i < vec.size(); i++) {
-        maximo = std::max(maximo, vec[i]);// std::max(maximo, vec[i]);
+    for (int i = 0; i < N; i++) {
+        maximo += in[i];// std::max(maximo, vec[i]);
     }
     cout << "Max CPU " << maximo << endl;
 
-    int max_cuda = test_reduce(vec);
+    int max_cuda = test_reduce(in, N);
 
     cout << "Max GPU " << max_cuda << endl;
-
+    delete in;
     return 0;
 }
